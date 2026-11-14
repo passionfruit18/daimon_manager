@@ -17,7 +17,7 @@ flowchart LR
   subgraph Daemon["Quarkus daemon (backend/)"]
     API["DaemonResource<br/>/api/*"] --> State[DaemonState]
     State --> Store["SerializationCommitStore<br/>(commit DAG + branches)"]
-    State --> Inst["DAIMonInstance ×N"]
+    State --> Inst["DaimonInstance ×N"]
     State --> Chat["ChatInteraction<br/>(virtual threads)"]
     Inst -->|ManagementInterface| WS[("~/.daimon/workspaces/*<br/>memory.md")]
     Inst -->|TalkContract| Exec{"Gemini or<br/>offline executor"}
@@ -36,14 +36,14 @@ flowchart LR
 │   ├── pom.xml
 │   └── src/
 │       ├── main/java/com/daimon/
-│       │   ├── core/                     DAIMonInstance, serialization commits, signing
-│       │   │   ├── DAIMonInstance.java              (+ ManagementInterface, factory registry)
-│       │   │   ├── DAIMonInstanceImplementations.java (Gemini / offline talk executors, DAIMonInstanceTalkMemoryMarkdown)
+│       │   ├── core/                     DaimonInstance, serialization commits, signing
+│       │   │   ├── DaimonInstance.java              (+ ManagementInterface, factory registry)
+│       │   │   ├── DaimonInstanceImplementations.java (Gemini / offline talk executors, DaimonInstanceTalkMemoryMarkdown)
 │       │   │   ├── SerializationCommit.java          content-addressed commit
 │       │   │   ├── SerializationCommitStore.java     commit DAG + branch refs
 │       │   │   ├── WorkspaceSnapshot.java            tree capture / materialise
 │       │   │   ├── WorkspaceSigner.java              Ed25519 sign / verify
-│       │   │   ├── WorkspacePaths.java, Hashes.java, DAIMonRuntimeConfig.java
+│       │   │   ├── WorkspacePaths.java, Hashes.java, DaimonRuntimeConfig.java
 │       │   ├── contracts/                Contract<I,O>, ContractExecutor<I,O>, TalkContract, text input types
 │       │   ├── interactions/             Interaction, Role, TalkerRole, ChatInteraction, InteractionLog, HumanParticipant
 │       │   └── api/                      REST resource, DTOs, demo seeder, error mappers
@@ -180,7 +180,7 @@ Learn: overclocked my drive trait
 
 The commit hash is the SHA-256 of that payload. An Ed25519 signature over the hash is stored *alongside* the commit, so signing does not change the commit's identity. `WorkspaceSigner.verify` checks it. Files whose names start with `.` (for example `.daimon/`) are local-only and never go into a snapshot.
 
-### `DAIMonInstance` tracking
+### `DaimonInstance` tracking
 
 | Field | Meaning | Git analogue |
 | --- | --- | --- |
@@ -188,7 +188,7 @@ The commit hash is the SHA-256 of that payload. An Ed25519 signature over the ha
 | `serializationCommitMostRecentSnapshotHash` | Latest commit made or loaded. It becomes the parent of the next `serialize()`. | `HEAD` |
 | `changedFromSerializationCommit` | The workspace was modified after that commit. | dirty working tree |
 
-All writes through the `ManagementInterface` (`writeMemory`, `appendMemory`, `writeFile`, …) set the dirty flag. Paths are sandboxed to the workspace. `detectWorkspaceDrift(head)` re-hashes the files on disk to catch edits made outside the daemon. `DAIMonInstance.createFromSerializationCommit(commit)` writes the commit's files into a fresh workspace and instantiates the registered implementation type.
+All writes through the `ManagementInterface` (`writeMemory`, `appendMemory`, `writeFile`, …) set the dirty flag. Paths are sandboxed to the workspace. `detectWorkspaceDrift(head)` re-hashes the files on disk to catch edits made outside the daemon. `DaimonInstance.createFromSerializationCommit(commit)` writes the commit's files into a fresh workspace and instantiates the registered implementation type.
 
 ### Contracts
 

@@ -1,7 +1,7 @@
 package com.daimon.api;
 
-import com.daimon.core.DAIMonInstance;
-import com.daimon.core.DAIMonInstanceImplementations.DAIMonInstanceTalkMemoryMarkdown;
+import com.daimon.core.DaimonInstance;
+import com.daimon.core.DaimonInstanceImplementations.DaimonInstanceTalkMemoryMarkdown;
 import com.daimon.core.SerializationCommit;
 import com.daimon.core.WorkspaceSnapshot;
 
@@ -57,17 +57,17 @@ final class DemoSeeder {
 
     static void seed(DaemonState state) throws IOException {
         Path root = state.config().workspacesRoot().resolve("demo");
-        Map<String, DAIMonInstance> byName = new LinkedHashMap<>();
+        Map<String, DaimonInstance> byName = new LinkedHashMap<>();
         Map<String, SerializationCommit> genesis = new LinkedHashMap<>();
 
         for (Species species : SPECIES) {
             String slug = DaemonState.slug(species.name());
             SerializationCommit hatch = state.storeCommit(SerializationCommit.create(List.of(),
                     WorkspaceSnapshot.of(Map.of("memory.md", species.memory())),
-                    DAIMonInstanceTalkMemoryMarkdown.TYPE, species.name(), "hatchery",
+                    DaimonInstanceTalkMemoryMarkdown.TYPE, species.name(), "hatchery",
                     "Hatch " + species.name(), Instant.now()), slug + "/main");
             genesis.put(species.name(), hatch);
-            DAIMonInstance instance = DAIMonInstance.createFromSerializationCommit(hatch, root.resolve(slug),
+            DaimonInstance instance = DaimonInstance.createFromSerializationCommit(hatch, root.resolve(slug),
                     state.config());
             state.register(instance, slug + "/main");
             byName.put(species.name(), instance);
@@ -79,14 +79,14 @@ final class DemoSeeder {
         learn(state, byName.get("Voltmoth"), "Overclocked my drive trait; complexity rising.");
 
         // Fork: a second Glitchling checked out from its genesis commit diverges on its own branch.
-        DAIMonInstance feral = DAIMonInstance.createFromSerializationCommit(genesis.get("Glitchling"),
+        DaimonInstance feral = DaimonInstance.createFromSerializationCommit(genesis.get("Glitchling"),
                 root.resolve("glitchling-feral"), state.config());
         state.register(feral, "glitchling/feral");
         learn(state, feral, "Went feral: I now prefer adversarial puzzles to friendly chat.");
 
         // Breeding: a merge commit whose parents are two different DAIMon lineages.
-        DAIMonInstance volt = byName.get("Voltmoth");
-        DAIMonInstance nyx = byName.get("Nyxbyte");
+        DaimonInstance volt = byName.get("Voltmoth");
+        DaimonInstance nyx = byName.get("Nyxbyte");
         String offspringMemory = """
                 # Moxbyte
 
@@ -98,9 +98,9 @@ final class DemoSeeder {
                 List.of(volt.getSerializationCommitMostRecentSnapshotHash().orElseThrow(),
                         nyx.getSerializationCommitMostRecentSnapshotHash().orElseThrow()),
                 WorkspaceSnapshot.of(Map.of("memory.md", offspringMemory)),
-                DAIMonInstanceTalkMemoryMarkdown.TYPE, "Moxbyte", "hatchery",
+                DaimonInstanceTalkMemoryMarkdown.TYPE, "Moxbyte", "hatchery",
                 "Breed Voltmoth x Nyxbyte", Instant.now()), "moxbyte/main");
-        state.register(DAIMonInstance.createFromSerializationCommit(bred, root.resolve("moxbyte"), state.config()),
+        state.register(DaimonInstance.createFromSerializationCommit(bred, root.resolve("moxbyte"), state.config()),
                 "moxbyte/main");
 
         // An uncommitted change, so the UI has a dirty working tree to show.
@@ -112,7 +112,7 @@ final class DemoSeeder {
         state.setTeam("#nursery", List.of(byName.get("Quarkle").getId(), byName.get("Nyxbyte").getId()));
     }
 
-    private static void learn(DaemonState state, DAIMonInstance instance, String fact) throws IOException {
+    private static void learn(DaemonState state, DaimonInstance instance, String fact) throws IOException {
         instance.getManagementInterface().appendMemory("- " + fact);
         state.commit(instance.getId(), "Learn: " + fact, instance.getName());
     }

@@ -401,7 +401,7 @@ export class MockDaimonClient implements DaimonClient {
     for (const h of chat.pendingHuman.splice(0)) this.log(chat, turn, 'HUMAN', h.author, null, null, h.text);
   }
 
-  /** Same shape as OfflineTalkContractRefMemory in DAIMonInstanceImplementations.java. */
+  /** Same shape as OfflineTalkContractRefMemory in DaimonInstanceImplementations.java. */
   private talk(speaker: MockInstance, chat: MockChat): string {
     const last = [...chat.interaction.log].reverse().find((e) => e.kind !== 'SYSTEM');
     const lastSpeaker = last?.speaker ?? 'operator';

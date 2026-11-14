@@ -6,9 +6,9 @@ import com.daimon.api.Dtos.InstanceDto;
 import com.daimon.api.Dtos.InteractionDto;
 import com.daimon.api.Dtos.LogEntryDto;
 import com.daimon.api.Dtos.ParticipantDto;
-import com.daimon.core.DAIMonInstance;
-import com.daimon.core.DAIMonInstanceImplementations.DAIMonInstanceTalkMemoryMarkdown;
-import com.daimon.core.DAIMonRuntimeConfig;
+import com.daimon.core.DaimonInstance;
+import com.daimon.core.DaimonInstanceImplementations.DaimonInstanceTalkMemoryMarkdown;
+import com.daimon.core.DaimonRuntimeConfig;
 import com.daimon.core.SerializationCommit;
 import com.daimon.core.SerializationCommitStore;
 import com.daimon.core.WorkspaceSigner;
@@ -61,16 +61,16 @@ public class DaemonState {
     @ConfigProperty(name = "daimon.gemini.api-key")
     Optional<String> geminiApiKey;
 
-    @ConfigProperty(name = "daimon.gemini.model", defaultValue = DAIMonRuntimeConfig.DEFAULT_GEMINI_VERSION)
+    @ConfigProperty(name = "daimon.gemini.model", defaultValue = DaimonRuntimeConfig.DEFAULT_GEMINI_VERSION)
     String geminiModel;
 
     @ConfigProperty(name = "daimon.seed-demo", defaultValue = "true")
     boolean seedDemo;
 
-    private DAIMonRuntimeConfig config;
+    private DaimonRuntimeConfig config;
     private final SerializationCommitStore store = new SerializationCommitStore();
     private final WorkspaceSigner signer = WorkspaceSigner.generate();
-    private final Map<String, DAIMonInstance> instances = Collections.synchronizedMap(new LinkedHashMap<>());
+    private final Map<String, DaimonInstance> instances = Collections.synchronizedMap(new LinkedHashMap<>());
     private final Map<String, String> instanceBranches = new ConcurrentHashMap<>();
     private final Map<String, Channel> channels = Collections.synchronizedMap(new LinkedHashMap<>());
     private final Map<String, ChatRecord> interactions = Collections.synchronizedMap(new LinkedHashMap<>());
@@ -83,7 +83,7 @@ public class DaemonState {
     }
 
     void onStart(@Observes StartupEvent event) {
-        config = new DAIMonRuntimeConfig(Path.of(home), geminiApiKey.orElse(null), geminiModel);
+        config = new DaimonRuntimeConfig(Path.of(home), geminiApiKey.orElse(null), geminiModel);
         LOG.infof("DAIMon daemon %s starting with %s", VERSION, config);
         if (seedDemo) {
             try {
@@ -106,7 +106,7 @@ public class DaemonState {
 
     // ------------------------------------------------------------------ accessors
 
-    public DAIMonRuntimeConfig config() {
+    public DaimonRuntimeConfig config() {
         return config;
     }
 
@@ -122,8 +122,8 @@ public class DaemonState {
         return instances.size();
     }
 
-    public DAIMonInstance requireInstance(String id) {
-        DAIMonInstance instance = instances.get(id);
+    public DaimonInstance requireInstance(String id) {
+        DaimonInstance instance = instances.get(id);
         if (instance == null) {
             throw new NotFoundException("No DAIMon instance " + id);
         }
@@ -143,7 +143,7 @@ public class DaemonState {
     }
 
     /** Registers a live instance and the branch its future commits will advance. */
-    DAIMonInstance register(DAIMonInstance instance, String branch) {
+    DaimonInstance register(DaimonInstance instance, String branch) {
         instances.put(instance.getId(), instance);
         instanceBranches.put(instance.getId(), branch);
         return instance;
@@ -154,7 +154,7 @@ public class DaemonState {
         requireText(name, "name");
         String slug = slug(name);
         Path workspace = config.workspacesRoot().resolve(slug + "-" + UUID.randomUUID().toString().substring(0, 8));
-        DAIMonInstance instance = DAIMonInstance.createNew(DAIMonInstanceTalkMemoryMarkdown.TYPE, name.strip(),
+        DaimonInstance instance = DaimonInstance.createNew(DaimonInstanceTalkMemoryMarkdown.TYPE, name.strip(),
                 workspace, config);
         instance.getManagementInterface().writeMemory(memory == null || memory.isBlank()
                 ? "# " + name.strip() + "\n\n- I was just hatched.\n"
@@ -167,7 +167,7 @@ public class DaemonState {
     /** Serializes an instance's workspace into a signed commit and advances its branch. */
     public CommitDto commit(String instanceId, String message, String author) throws IOException {
         requireText(message, "message");
-        DAIMonInstance instance = requireInstance(instanceId);
+        DaimonInstance instance = requireInstance(instanceId);
         SerializationCommit commit = store.put(instance.serialize(
                 author == null || author.isBlank() ? "operator" : author, message, signer));
         store.updateBranch(instanceBranches.get(instanceId), commit.hash());
@@ -180,7 +180,7 @@ public class DaemonState {
         String slug = slug(commit.instanceName());
         Path workspace = config.workspacesRoot().resolve(slug + "-" + commit.shortHash() + "-"
                 + UUID.randomUUID().toString().substring(0, 4));
-        DAIMonInstance instance = DAIMonInstance.createFromSerializationCommit(commit, workspace, config);
+        DaimonInstance instance = DaimonInstance.createFromSerializationCommit(commit, workspace, config);
         register(instance, slug + "/fork-" + commit.shortHash() + "-" + instance.getId().substring(0, 4));
         return toDto(instance);
     }
@@ -199,14 +199,14 @@ public class DaemonState {
 
     public InstanceDto writeMemory(String id, String content) throws IOException {
         Objects.requireNonNull(content, "content");
-        DAIMonInstance instance = requireInstance(id);
+        DaimonInstance instance = requireInstance(id);
         instance.getManagementInterface().writeMemory(content);
         return toDto(instance);
     }
 
     public InstanceDto appendMemory(String id, String entry) throws IOException {
         requireText(entry, "entry");
-        DAIMonInstance instance = requireInstance(id);
+        DaimonInstance instance = requireInstance(id);
         instance.getManagementInterface().appendMemory(entry.startsWith("- ") ? entry : "- " + entry);
         return toDto(instance);
     }
@@ -265,7 +265,7 @@ public class DaemonState {
         if (ids.isEmpty()) {
             throw new IllegalArgumentException("Choose at least one participant (or a channel with a team)");
         }
-        List<DAIMonInstance> participants = ids.stream().map(this::requireInstance).toList();
+        List<DaimonInstance> participants = ids.stream().map(this::requireInstance).toList();
         ChatInteraction chat = ChatInteraction.builder()
                 .topic(request.topic() == null || request.topic().isBlank() ? "open conversation" : request.topic())
                 .turnLimit(request.turnLimit() == null ? 6 : request.turnLimit())
@@ -279,12 +279,12 @@ public class DaemonState {
     }
 
     /** After a chat, each participant remembers it — leaving its workspace dirty until committed. */
-    private void rememberChat(ChatInteraction chat, List<DAIMonInstance> participants) {
+    private void rememberChat(ChatInteraction chat, List<DaimonInstance> participants) {
         if (chat.completedTurns() == 0) {
             return;
         }
-        for (DAIMonInstance participant : participants) {
-            String others = participants.stream().filter(p -> p != participant).map(DAIMonInstance::getName)
+        for (DaimonInstance participant : participants) {
+            String others = participants.stream().filter(p -> p != participant).map(DaimonInstance::getName)
                     .distinct().reduce((a, b) -> a + ", " + b).orElse("myself");
             try {
                 participant.getManagementInterface().appendMemory(
@@ -329,7 +329,7 @@ public class DaemonState {
 
     // ------------------------------------------------------------------ mapping
 
-    InstanceDto toDto(DAIMonInstance instance) {
+    InstanceDto toDto(DaimonInstance instance) {
         try {
             return new InstanceDto(instance.getId(), instance.getName(), instance.implementationType(),
                     instance.getWorkspace().toString(), instanceBranches.get(instance.getId()),

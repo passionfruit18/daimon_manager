@@ -39,7 +39,7 @@ import java.util.concurrent.ConcurrentHashMap;
  * <p>All writes through the {@link ManagementInterface} set the changed flag automatically.
  * Edits made outside the daemon can be detected with {@link #detectWorkspaceDrift}.
  */
-public abstract class DAIMonInstance implements ContractParticipant {
+public abstract class DaimonInstance implements ContractParticipant {
 
     /** Default name of the markdown memory file inside a workspace. */
     public static final String DEFAULT_MEMORY_FILE = "memory.md";
@@ -49,7 +49,7 @@ public abstract class DAIMonInstance implements ContractParticipant {
     /** Creates a concrete instance for an implementation type. */
     @FunctionalInterface
     public interface Factory {
-        DAIMonInstance create(Seed seed);
+        DaimonInstance create(Seed seed);
     }
 
     /**
@@ -57,7 +57,7 @@ public abstract class DAIMonInstance implements ContractParticipant {
      *
      * @param createdFromHash commit the workspace was materialised from, or {@code null}
      */
-    public record Seed(String name, Path workspace, String createdFromHash, DAIMonRuntimeConfig config) {
+    public record Seed(String name, Path workspace, String createdFromHash, DaimonRuntimeConfig config) {
         public Seed {
             Objects.requireNonNull(name, "name");
             if (name.isBlank() || name.contains("\n")) {
@@ -74,8 +74,8 @@ public abstract class DAIMonInstance implements ContractParticipant {
     private static final Map<String, Factory> IMPLEMENTATIONS = new ConcurrentHashMap<>();
 
     static {
-        registerImplementation(DAIMonInstanceImplementations.DAIMonInstanceTalkMemoryMarkdown.TYPE,
-                DAIMonInstanceImplementations.DAIMonInstanceTalkMemoryMarkdown::new);
+        registerImplementation(DaimonInstanceImplementations.DaimonInstanceTalkMemoryMarkdown.TYPE,
+                DaimonInstanceImplementations.DaimonInstanceTalkMemoryMarkdown::new);
     }
 
     /** Registers a new implementation type so commits of that type can be checked out. */
@@ -93,10 +93,10 @@ public abstract class DAIMonInstance implements ContractParticipant {
 
     /**
      * Checks out {@code serializationCommit} into a fresh workspace under the default DAIMon
-     * home (see {@link DAIMonRuntimeConfig#fromEnvironment()}).
+     * home (see {@link DaimonRuntimeConfig#fromEnvironment()}).
      */
-    public static DAIMonInstance createFromSerializationCommit(SerializationCommit serializationCommit) {
-        DAIMonRuntimeConfig config = DAIMonRuntimeConfig.fromEnvironment();
+    public static DaimonInstance createFromSerializationCommit(SerializationCommit serializationCommit) {
+        DaimonRuntimeConfig config = DaimonRuntimeConfig.fromEnvironment();
         return createFromSerializationCommit(serializationCommit,
                 uniqueWorkspaceFor(config.workspacesRoot(), serializationCommit), config);
     }
@@ -106,8 +106,8 @@ public abstract class DAIMonInstance implements ContractParticipant {
      * (overwriting same-named files) and instantiates its implementation type. The new instance
      * is clean, with both tracking hashes set to the commit hash.
      */
-    public static DAIMonInstance createFromSerializationCommit(SerializationCommit serializationCommit,
-            Path workspace, DAIMonRuntimeConfig config) {
+    public static DaimonInstance createFromSerializationCommit(SerializationCommit serializationCommit,
+            Path workspace, DaimonRuntimeConfig config) {
         Objects.requireNonNull(serializationCommit, "serializationCommit");
         Factory factory = factoryFor(serializationCommit.implementationType());
         try {
@@ -120,15 +120,15 @@ public abstract class DAIMonInstance implements ContractParticipant {
     }
 
     /** Creates a brand-new DAIMon (no commit yet) over an existing or empty workspace. */
-    public static DAIMonInstance createNew(String implementationType, String name, Path workspace,
-            DAIMonRuntimeConfig config) {
+    public static DaimonInstance createNew(String implementationType, String name, Path workspace,
+            DaimonRuntimeConfig config) {
         Factory factory = factoryFor(implementationType);
         try {
             Files.createDirectories(workspace);
         } catch (IOException e) {
             throw new UncheckedIOException("Failed to create workspace " + workspace, e);
         }
-        DAIMonInstance instance = factory.create(new Seed(name, workspace, null, config));
+        DaimonInstance instance = factory.create(new Seed(name, workspace, null, config));
         instance.changedFromSerializationCommit = true; // nothing has been serialized yet
         return instance;
     }
@@ -156,7 +156,7 @@ public abstract class DAIMonInstance implements ContractParticipant {
     private final String id = UUID.randomUUID().toString();
     private final String name;
     private final Path workspace;
-    private final DAIMonRuntimeConfig config;
+    private final DaimonRuntimeConfig config;
     private final String serializationCommitCreatedFromSnapshotHash;
     private final ContractExecutorRegistry executors = new ContractExecutorRegistry();
     private final ManagementInterface managementInterface = new WorkspaceManagementInterface();
@@ -165,7 +165,7 @@ public abstract class DAIMonInstance implements ContractParticipant {
     private volatile String serializationCommitMostRecentSnapshotHash;
     private volatile boolean changedFromSerializationCommit;
 
-    protected DAIMonInstance(Seed seed) {
+    protected DaimonInstance(Seed seed) {
         Objects.requireNonNull(seed, "seed");
         this.name = seed.name().strip();
         this.workspace = seed.workspace();
@@ -195,7 +195,7 @@ public abstract class DAIMonInstance implements ContractParticipant {
         return workspace;
     }
 
-    protected final DAIMonRuntimeConfig getConfig() {
+    protected final DaimonRuntimeConfig getConfig() {
         return config;
     }
 

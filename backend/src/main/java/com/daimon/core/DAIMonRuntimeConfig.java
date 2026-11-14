@@ -11,11 +11,11 @@ import java.util.Optional;
  * @param geminiAPIKey Gemini API key, or {@code null} to use the offline talk executor
  * @param geminiVersion Gemini model id, e.g. {@code gemini-2.5-flash}
  */
-public record DAIMonRuntimeConfig(Path home, String geminiAPIKey, String geminiVersion) {
+public record DaimonRuntimeConfig(Path home, String geminiAPIKey, String geminiVersion) {
 
     public static final String DEFAULT_GEMINI_VERSION = "gemini-2.5-flash";
 
-    public DAIMonRuntimeConfig {
+    public DaimonRuntimeConfig {
         Objects.requireNonNull(home, "home");
         if (geminiAPIKey != null && geminiAPIKey.isBlank()) {
             geminiAPIKey = null;
@@ -24,9 +24,9 @@ public record DAIMonRuntimeConfig(Path home, String geminiAPIKey, String geminiV
     }
 
     /** Reads {@code DAIMON_HOME}, {@code GEMINI_API_KEY} and {@code DAIMON_GEMINI_MODEL}. */
-    public static DAIMonRuntimeConfig fromEnvironment() {
+    public static DaimonRuntimeConfig fromEnvironment() {
         String home = System.getenv("DAIMON_HOME");
-        return new DAIMonRuntimeConfig(
+        return new DaimonRuntimeConfig(
                 home != null && !home.isBlank() ? Path.of(home) : Path.of(System.getProperty("user.home"), ".daimon"),
                 System.getenv("GEMINI_API_KEY"),
                 System.getenv("DAIMON_GEMINI_MODEL"));
@@ -47,6 +47,6 @@ public record DAIMonRuntimeConfig(Path home, String geminiAPIKey, String geminiV
     @Override
     public String toString() {
         // Never print the key.
-        return "DAIMonRuntimeConfig[home=" + home + ", gemini=" + (geminiEnabled() ? geminiVersion : "disabled") + "]";
+        return "DaimonRuntimeConfig[home=" + home + ", gemini=" + (geminiEnabled() ? geminiVersion : "disabled") + "]";
     }
 }

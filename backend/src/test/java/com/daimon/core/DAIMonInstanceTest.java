@@ -2,7 +2,7 @@ package com.daimon.core;
 
 import com.daimon.contracts.ContractInputTypeRawText;
 import com.daimon.contracts.TalkContract;
-import com.daimon.core.DAIMonInstanceImplementations.DAIMonInstanceTalkMemoryMarkdown;
+import com.daimon.core.DaimonInstanceImplementations.DaimonInstanceTalkMemoryMarkdown;
 import com.sun.net.httpserver.HttpServer;
 
 import org.junit.jupiter.api.Test;
@@ -23,18 +23,18 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-class DAIMonInstanceTest {
+class DaimonInstanceTest {
 
     @TempDir
     Path tmp;
 
-    private DAIMonRuntimeConfig offline() {
-        return new DAIMonRuntimeConfig(tmp.resolve("home"), null, null);
+    private DaimonRuntimeConfig offline() {
+        return new DaimonRuntimeConfig(tmp.resolve("home"), null, null);
     }
 
     @Test
     void serializationTrackingFollowsTheWorkspace() throws IOException {
-        DAIMonInstance instance = DAIMonInstance.createNew(DAIMonInstanceTalkMemoryMarkdown.TYPE, "Glitchling",
+        DaimonInstance instance = DaimonInstance.createNew(DaimonInstanceTalkMemoryMarkdown.TYPE, "Glitchling",
                 tmp.resolve("ws1"), offline());
         assertTrue(instance.getSerializationCommitCreatedFromSnapshotHash().isEmpty());
         assertTrue(instance.isChangedFromSerializationCommit());
@@ -59,7 +59,7 @@ class DAIMonInstanceTest {
 
     @Test
     void createFromSerializationCommitMaterialisesTheWorkspace() throws IOException {
-        DAIMonInstance parent = DAIMonInstance.createNew(DAIMonInstanceTalkMemoryMarkdown.TYPE, "Nyxbyte",
+        DaimonInstance parent = DaimonInstance.createNew(DaimonInstanceTalkMemoryMarkdown.TYPE, "Nyxbyte",
                 tmp.resolve("parent"), offline());
         parent.getManagementInterface().writeMemory("# Nyxbyte\n- signs everything\n");
         parent.getManagementInterface().writeFile("notes/today.md", "hello");
@@ -67,7 +67,7 @@ class DAIMonInstanceTest {
         SerializationCommit commit = parent.serialize("tester", "genesis", null);
         assertEquals(java.util.Set.of("memory.md", "notes/today.md"), commit.snapshot().files().keySet());
 
-        DAIMonInstance child = DAIMonInstance.createFromSerializationCommit(commit, tmp.resolve("child"), offline());
+        DaimonInstance child = DaimonInstance.createFromSerializationCommit(commit, tmp.resolve("child"), offline());
         assertEquals("Nyxbyte", child.getName());
         assertEquals(commit.hash(), child.getSerializationCommitCreatedFromSnapshotHash().orElseThrow());
         assertEquals(commit.hash(), child.getSerializationCommitMostRecentSnapshotHash().orElseThrow());
@@ -79,7 +79,7 @@ class DAIMonInstanceTest {
 
     @Test
     void managementInterfaceIsSandboxed() {
-        DAIMonInstance instance = DAIMonInstance.createNew(DAIMonInstanceTalkMemoryMarkdown.TYPE, "Quarkle",
+        DaimonInstance instance = DaimonInstance.createNew(DaimonInstanceTalkMemoryMarkdown.TYPE, "Quarkle",
                 tmp.resolve("ws"), offline());
         assertThrows(IllegalArgumentException.class,
                 () -> instance.getManagementInterface().writeFile("../escape.md", "x"));
@@ -106,7 +106,7 @@ class DAIMonInstanceTest {
         });
         server.start();
         try {
-            var executor = new DAIMonInstanceImplementations.BasicGeminiTalkContractRefMemory("secret-key",
+            var executor = new DaimonInstanceImplementations.BasicGeminiTalkContractRefMemory("secret-key",
                     "gemini-2.5-flash", () -> "- I love moths", "persona",
                     URI.create("http://127.0.0.1:" + server.getAddress().getPort() + "/v1beta/"),
                     HttpClient.newHttpClient(), Duration.ofSeconds(5));

@@ -31,13 +31,13 @@ import java.util.function.Supplier;
  *       Gemini, injecting the DAIMon's memory (read fresh on every call) as system context.</li>
  *   <li>{@link OfflineTalkContractRefMemory} — deterministic, network-free fallback with the
  *       same memory-referencing behaviour, used when no API key is configured.</li>
- *   <li>{@link DAIMonInstanceTalkMemoryMarkdown} — a DAIMon whose personality and memory live
+ *   <li>{@link DaimonInstanceTalkMemoryMarkdown} — a DAIMon whose personality and memory live
  *       in a markdown file and who can talk.</li>
  * </ul>
  */
-public final class DAIMonInstanceImplementations {
+public final class DaimonInstanceImplementations {
 
-    private DAIMonInstanceImplementations() {
+    private DaimonInstanceImplementations() {
     }
 
     // ======================================================================================
@@ -270,20 +270,20 @@ public final class DAIMonInstanceImplementations {
      * fulfils {@link TalkContract} by referencing that memory: via Gemini when a key is
      * configured, otherwise via {@link OfflineTalkContractRefMemory}.
      */
-    public static final class DAIMonInstanceTalkMemoryMarkdown extends DAIMonInstance {
+    public static final class DaimonInstanceTalkMemoryMarkdown extends DaimonInstance {
 
         public static final String TYPE = "daimon.instance.talk-memory-markdown/v1";
 
         private final String memoryMarkdownPath;
 
-        public DAIMonInstanceTalkMemoryMarkdown(Seed seed) {
+        public DaimonInstanceTalkMemoryMarkdown(Seed seed) {
             this(seed, DEFAULT_MEMORY_FILE);
         }
 
-        public DAIMonInstanceTalkMemoryMarkdown(Seed seed, String memoryMarkdownPath) {
+        public DaimonInstanceTalkMemoryMarkdown(Seed seed, String memoryMarkdownPath) {
             super(seed);
             this.memoryMarkdownPath = WorkspacePaths.normalizeRelative(memoryMarkdownPath);
-            DAIMonRuntimeConfig config = seed.config();
+            DaimonRuntimeConfig config = seed.config();
             Supplier<String> memory = this::getMemory;
             if (config.geminiEnabled()) {
                 registerExecutor(new BasicGeminiTalkContractRefMemory(config.geminiKey().orElseThrow(),

@@ -7,9 +7,9 @@ import com.daimon.contracts.ContractInputTypeRawText;
 import com.daimon.contracts.ContractInputTypeText;
 import com.daimon.contracts.ContractParticipant;
 import com.daimon.contracts.TalkContract;
-import com.daimon.core.DAIMonInstance;
-import com.daimon.core.DAIMonInstanceImplementations.DAIMonInstanceTalkMemoryMarkdown;
-import com.daimon.core.DAIMonRuntimeConfig;
+import com.daimon.core.DaimonInstance;
+import com.daimon.core.DaimonInstanceImplementations.DaimonInstanceTalkMemoryMarkdown;
+import com.daimon.core.DaimonRuntimeConfig;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -81,11 +81,11 @@ class ChatInteractionTest {
 
     @Test
     void offlineDaimonsChatAndHumansCanInterject() throws Exception {
-        DAIMonRuntimeConfig config = new DAIMonRuntimeConfig(tmp, null, null);
-        DAIMonInstance a = DAIMonInstance.createNew(DAIMonInstanceTalkMemoryMarkdown.TYPE, "Voltmoth",
+        DaimonRuntimeConfig config = new DaimonRuntimeConfig(tmp, null, null);
+        DaimonInstance a = DaimonInstance.createNew(DaimonInstanceTalkMemoryMarkdown.TYPE, "Voltmoth",
                 tmp.resolve("a"), config);
         a.getManagementInterface().writeMemory("- I chase bright ideas.\n");
-        DAIMonInstance b = DAIMonInstance.createNew(DAIMonInstanceTalkMemoryMarkdown.TYPE, "Nyxbyte",
+        DaimonInstance b = DaimonInstance.createNew(DaimonInstanceTalkMemoryMarkdown.TYPE, "Nyxbyte",
                 tmp.resolve("b"), config);
 
         ChatInteraction chat = ChatInteraction.builder().topic("signatures").turnLimit(4)
