@@ -46,6 +46,7 @@ flowchart LR
 │       │   │   ├── WorkspacePaths.java, Hashes.java, DaimonRuntimeConfig.java
 │       │   ├── contracts/                Contract<I,O>, ContractExecutor<I,O>, TalkContract, text input types
 │       │   ├── interactions/             Interaction, Role, TalkerRole, ChatInteraction, InteractionLog, HumanParticipant
+│       │   ├── storage/                  DaimonRepository: on-disk commits, blobs, refs, instances, keys
 │       │   └── api/                      REST resource, DTOs, demo seeder, error mappers
 │       ├── main/resources/application.properties
 │       └── test/java/com/daimon/         JUnit 5 tests (core + interactions)
@@ -111,10 +112,10 @@ The key is sent in the `x-goog-api-key` header, not the URL. It is also never pr
 | Property (`application.properties`) | Env var | Default | Meaning |
 | --- | --- | --- | --- |
 | `quarkus.http.port` | `QUARKUS_HTTP_PORT` | `7777` | Daemon port (bound to `127.0.0.1` only) |
-| `daimon.home` | `DAIMON_HOME` | `~/.daimon` | Root of materialised workspaces (`$home/workspaces/…`) |
+| `daimon.home` | `DAIMON_HOME` | `~/.daimon` | Where everything is saved: commits, instances, keys, channels and workspaces (see [Persistence](#persistence)) |
 | `daimon.gemini.api-key` | `GEMINI_API_KEY` | *(empty → offline)* | Gemini API key |
 | `daimon.gemini.model` | `DAIMON_GEMINI_MODEL` | `gemini-2.5-flash` | Gemini model id |
-| `daimon.seed-demo` | `DAIMON_SEED_DEMO` | `true` | Seed demo DAIMons, a fork, a bred merge, and channels at startup |
+| `daimon.seed-demo` | `DAIMON_SEED_DEMO` | `true` | On first run only (empty repository), seed demo DAIMons, a fork, a bred merge, and channels |
 | `quarkus.http.cors.origins` | — | Vite + Tauri origins | Origins allowed to call the API |
 
 Frontend environment variables (put them in `frontend/.env.local`):
@@ -214,6 +215,47 @@ A dirty workspace is drawn with a chromatic glitch effect.
 
 ---
 
+## Persistence
+
+The daemon saves every change as it happens and reloads everything at startup. Nothing needs an explicit "save". Everything lives under `DAIMON_HOME` (default `~/.daimon`):
+
+```
+~/.daimon/
+├── repository.json              format version
+├── objects/ab/cdef….json        one file per serialization commit: metadata, parents, signature,
+│                                and a map of file path → blob hash
+├── blobs/12/34ab…               file contents, stored once each by their SHA-256 and shared
+│                                between commits
+├── refs.json                    branch name → commit hash
+├── instances/<id>.json          live DAIMons: name, workspace path, implementation type, branch,
+│                                createdFrom / mostRecent commit hashes
+├── keys/signer.json             Ed25519 signing key (directory 0700, file 0600)
+├── channels.json                channels and the teams exposed on them
+├── interactions/<id>.json       transcript of every finished (or cancelled) interaction
+└── workspaces/…                 the DAIMons' working files (memory.md, …)
+```
+
+| What | When it is written |
+| --- | --- |
+| Workspace files | Immediately, on every `ManagementInterface` write |
+| Commit, its blobs, and `refs.json` | When a commit is created (hatch, commit, breed) |
+| `instances/<id>.json` | When an instance is hatched or checked out, and after each of its commits |
+| `channels.json` | When a channel is created or its team changes |
+| `interactions/<id>.json` | When an interaction finishes, fails, or is cancelled, including at shutdown |
+| `keys/signer.json` | Once, on first start |
+
+**How it stays safe and consistent**
+
+* **Atomic writes.** Every file is written to a temporary file in the same directory and then moved into place, so a crash cannot leave a half-written file.
+* **Integrity checks on load.** Each commit's tree hash and commit hash are recomputed from its blobs, and every blob is checked against its hash. If a commit has been edited or corrupted, or one of its parents is missing, it is skipped and a warning is logged. It is never silently trusted.
+* **Dirty flags are recomputed.** `changedFromSerializationCommit` is not saved. On startup, `DaimonInstance.restore` compares each workspace on disk with its most recent commit, so edits made in a text editor while the daemon was stopped show up as uncommitted changes.
+* **Missing workspaces are recovered.** If a workspace folder has been deleted, it is re-created from the instance's most recent commit.
+* **Stable ids.** Instances keep their ids across restarts, so channel teams and interaction transcripts keep pointing at the right DAIMons.
+
+To start from scratch, stop the daemon and delete `~/.daimon` (or point `DAIMON_HOME` somewhere else). The demo is seeded again on the next start.
+
+---
+
 ## HTTP API (`/api`)
 
 | Method | Path | Description |
@@ -247,7 +289,7 @@ curl -s -X POST localhost:7777/api/interactions/chat \
 
 ## Current limitations and next steps
 
-* **Persistence.** The commit store and signing key are kept in memory, so history is re-seeded on every restart. Workspaces on disk do persist. Next steps: write commits to `$DAIMON_HOME/objects/` and keep the key in the OS keychain or Tauri Stronghold.
+* **Persistence.** The signing key is stored as a file with owner-only permissions. Moving it into the OS keychain or Tauri Stronghold would be stronger. Nothing is ever deleted: there is no API to remove an instance yet, and no garbage collection of unreferenced blobs. Interactions that were running when the daemon stopped are saved as `CANCELLED` and cannot be resumed.
 * **Peer-to-peer.** Channels are local only. The commit format and signatures are designed so that commits can later be exchanged between peers and verified.
 * **Merges.** Breeding is currently done by the demo seeder. A merge API that combines memories, with conflict handling, is the obvious next feature.
 * **Streaming.** The UI polls the API (every 600 ms while a chat is running). Server-sent events from `InteractionLog` listeners would make it push-based.

@@ -42,6 +42,45 @@ public final class WorkspaceSigner {
         return new WorkspaceSigner(keyPair);
     }
 
+    /**
+     * Restores a signer from its encoded keys, checking that the two halves belong together.
+     *
+     * @param publicKeyX509Base64   Base64 X.509 SubjectPublicKeyInfo
+     * @param privateKeyPkcs8Base64 Base64 PKCS#8 PrivateKeyInfo
+     */
+    public static WorkspaceSigner fromEncoded(String publicKeyX509Base64, String privateKeyPkcs8Base64) {
+        try {
+            KeyFactory keyFactory = KeyFactory.getInstance(ALGORITHM);
+            PublicKey publicKey = keyFactory.generatePublic(
+                    new X509EncodedKeySpec(Base64.getDecoder().decode(publicKeyX509Base64)));
+            java.security.PrivateKey privateKey = keyFactory.generatePrivate(
+                    new java.security.spec.PKCS8EncodedKeySpec(Base64.getDecoder().decode(privateKeyPkcs8Base64)));
+            KeyPair pair = new KeyPair(publicKey, privateKey);
+
+            byte[] probe = "daimon-key-check".getBytes(StandardCharsets.UTF_8);
+            Signature signer = Signature.getInstance(ALGORITHM);
+            signer.initSign(privateKey);
+            signer.update(probe);
+            Signature verifier = Signature.getInstance(ALGORITHM);
+            verifier.initVerify(publicKey);
+            verifier.update(probe);
+            if (!verifier.verify(signer.sign())) {
+                throw new IllegalArgumentException("Public and private key do not match");
+            }
+            return new WorkspaceSigner(pair);
+        } catch (GeneralSecurityException | IllegalArgumentException e) {
+            throw new IllegalArgumentException("Invalid Ed25519 key material: " + e.getMessage(), e);
+        }
+    }
+
+    /**
+     * Base64 PKCS#8 encoding of the private key, for persisting the signer. Treat the result as a
+     * secret: store it with owner-only permissions and never log it.
+     */
+    public String exportPrivateKeyPkcs8Base64() {
+        return Base64.getEncoder().encodeToString(keyPair.getPrivate().getEncoded());
+    }
+
     /** Base64 X.509 SubjectPublicKeyInfo encoding of the public key. */
     public String publicKeyBase64() {
         return publicKeyBase64;

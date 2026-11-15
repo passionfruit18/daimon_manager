@@ -56,8 +56,17 @@ public abstract class DaimonInstance implements ContractParticipant {
      * Everything a {@link Factory} needs to construct an instance.
      *
      * @param createdFromHash commit the workspace was materialised from, or {@code null}
+     * @param id              instance id to reuse when restoring a persisted instance, or
+     *                        {@code null} to generate a fresh one
      */
-    public record Seed(String name, Path workspace, String createdFromHash, DaimonRuntimeConfig config) {
+    public record Seed(String name, Path workspace, String createdFromHash, DaimonRuntimeConfig config, String id) {
+        private static final java.util.regex.Pattern ID_PATTERN =
+                java.util.regex.Pattern.compile("[A-Za-z0-9][A-Za-z0-9._-]{0,127}");
+
+        public Seed(String name, Path workspace, String createdFromHash, DaimonRuntimeConfig config) {
+            this(name, workspace, createdFromHash, config, null);
+        }
+
         public Seed {
             Objects.requireNonNull(name, "name");
             if (name.isBlank() || name.contains("\n")) {
@@ -68,6 +77,11 @@ public abstract class DaimonInstance implements ContractParticipant {
                 Hashes.requireHash(createdFromHash, "createdFromHash");
             }
             Objects.requireNonNull(config, "config");
+            if (id == null) {
+                id = UUID.randomUUID().toString();
+            } else if (!ID_PATTERN.matcher(id).matches()) {
+                throw new IllegalArgumentException("Invalid instance id: " + id);
+            }
         }
     }
 
@@ -133,6 +147,37 @@ public abstract class DaimonInstance implements ContractParticipant {
         return instance;
     }
 
+    /**
+     * Re-creates a persisted instance after a daemon restart, keeping its id and tracking hashes.
+     *
+     * <p>If the workspace directory is missing it is re-materialised from {@code mostRecent}. The
+     * changed flag is not trusted from storage: it is recomputed by comparing the workspace on
+     * disk with {@code mostRecent} (and is {@code true} when there is no commit yet).
+     *
+     * @param mostRecent the instance's most recent commit, or {@code null} if it has none
+     */
+    public static DaimonInstance restore(String id, String implementationType, String name, Path workspace,
+            String createdFromHash, SerializationCommit mostRecent, DaimonRuntimeConfig config) throws IOException {
+        Objects.requireNonNull(id, "id");
+        Factory factory = factoryFor(implementationType);
+        if (!Files.isDirectory(workspace)) {
+            if (mostRecent != null) {
+                mostRecent.snapshot().materialize(workspace);
+            } else {
+                Files.createDirectories(workspace);
+            }
+        }
+        DaimonInstance instance = factory.create(new Seed(name, workspace, createdFromHash, config, id));
+        if (mostRecent == null) {
+            instance.serializationCommitMostRecentSnapshotHash = null;
+            instance.changedFromSerializationCommit = true;
+        } else {
+            instance.serializationCommitMostRecentSnapshotHash = mostRecent.hash();
+            instance.detectWorkspaceDrift(mostRecent);
+        }
+        return instance;
+    }
+
     private static Factory factoryFor(String implementationType) {
         Factory factory = IMPLEMENTATIONS.get(implementationType);
         if (factory == null) {
@@ -153,7 +198,7 @@ public abstract class DaimonInstance implements ContractParticipant {
 
     // ------------------------------------------------------------------ instance state
 
-    private final String id = UUID.randomUUID().toString();
+    private final String id;
     private final String name;
     private final Path workspace;
     private final DaimonRuntimeConfig config;
@@ -167,6 +212,7 @@ public abstract class DaimonInstance implements ContractParticipant {
 
     protected DaimonInstance(Seed seed) {
         Objects.requireNonNull(seed, "seed");
+        this.id = seed.id();
         this.name = seed.name().strip();
         this.workspace = seed.workspace();
         this.config = seed.config();

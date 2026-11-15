@@ -14,6 +14,9 @@ import com.daimon.core.SerializationCommitStore;
 import com.daimon.core.WorkspaceSigner;
 import com.daimon.interactions.ChatInteraction;
 import com.daimon.interactions.InteractionLog;
+import com.daimon.storage.DaimonRepository;
+import com.daimon.storage.DaimonRepository.InstanceRecord;
+import com.daimon.storage.DaimonRepository.LoadResult;
 
 import io.quarkus.runtime.ShutdownEvent;
 import io.quarkus.runtime.StartupEvent;
@@ -31,6 +34,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -45,8 +49,12 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 
 /**
- * The daemon's single source of truth: commit graph, live instances, channels and running
- * interactions. REST resources are thin adapters over this bean.
+ * The daemon's single source of truth: commit graph, live instances, channels and interactions.
+ * REST resources are thin adapters over this bean.
+ *
+ * <p>Everything is persisted through {@link DaimonRepository} as it changes, and reloaded on
+ * startup: commits and branch refs, the instance registry, channels, the signing key, and the
+ * logs of finished interactions. Workspace files are written directly by each instance.
  */
 @ApplicationScoped
 public class DaemonState {
@@ -69,9 +77,13 @@ public class DaemonState {
 
     private DaimonRuntimeConfig config;
     private final SerializationCommitStore store = new SerializationCommitStore();
-    private final WorkspaceSigner signer = WorkspaceSigner.generate();
+    private DaimonRepository repository;
+    private WorkspaceSigner signer;
     private final Map<String, DaimonInstance> instances = Collections.synchronizedMap(new LinkedHashMap<>());
     private final Map<String, String> instanceBranches = new ConcurrentHashMap<>();
+    private final Map<String, String> instanceCreatedAt = new ConcurrentHashMap<>();
+    /** Finished interactions loaded from disk (read-only). Live ones are in {@link #interactions}. */
+    private final Map<String, InteractionDto> archivedInteractions = new ConcurrentHashMap<>();
     private final Map<String, Channel> channels = Collections.synchronizedMap(new LinkedHashMap<>());
     private final Map<String, ChatRecord> interactions = Collections.synchronizedMap(new LinkedHashMap<>());
     private final ExecutorService interactionExecutor = Executors.newVirtualThreadPerTaskExecutor();
@@ -85,12 +97,106 @@ public class DaemonState {
     void onStart(@Observes StartupEvent event) {
         config = new DaimonRuntimeConfig(Path.of(home), geminiApiKey.orElse(null), geminiModel);
         LOG.infof("DAIMon daemon %s starting with %s", VERSION, config);
-        if (seedDemo) {
+        try {
+            repository = new DaimonRepository(config.home());
+            signer = repository.loadOrCreateSigner();
+            load();
+        } catch (IOException e) {
+            throw new UncheckedIOException("Cannot open DAIMon repository at " + config.home(), e);
+        }
+        LOG.infof("Loaded %d commits, %d instances, %d channels, %d past interactions from %s", store.size(),
+                instances.size(), channels.size(), archivedInteractions.size(), repository.root());
+        if (seedDemo && store.size() == 0 && instances.isEmpty()) {
             try {
                 DemoSeeder.seed(this);
+                LOG.info("First run: seeded demo DAIMons");
             } catch (IOException | RuntimeException e) {
                 LOG.error("Failed to seed demo DAIMons", e);
             }
+        }
+    }
+
+    // ------------------------------------------------------------------ persistence
+
+    /** Restores state from the repository. Damaged entries are skipped with a warning. */
+    private void load() throws IOException {
+        LoadResult<SerializationCommit> commits = repository.loadCommits();
+        commits.items().forEach(store::put);
+        commits.problems().forEach(LOG::warn);
+
+        repository.loadRefs().forEach((branch, hash) -> {
+            if (store.contains(hash)) {
+                store.updateBranch(branch, hash);
+            } else {
+                LOG.warnf("Dropping branch %s: commit %s is missing", branch, hash);
+            }
+        });
+
+        LoadResult<InstanceRecord> records = repository.loadInstances();
+        records.problems().forEach(LOG::warn);
+        List<InstanceRecord> sorted = new ArrayList<>(records.items());
+        sorted.sort(Comparator.comparing(r -> Objects.requireNonNullElse(r.createdAt(), "")));
+        for (InstanceRecord r : sorted) {
+            try {
+                SerializationCommit head = r.mostRecentHash() == null ? null : store.get(r.mostRecentHash())
+                        .orElseThrow(() -> new IOException("most recent commit " + r.mostRecentHash() + " is missing"));
+                DaimonInstance instance = DaimonInstance.restore(r.id(), r.implementationType(), r.name(),
+                        Path.of(r.workspace()), r.createdFromHash(), head, config);
+                instances.put(instance.getId(), instance);
+                instanceBranches.put(instance.getId(), r.branch());
+                instanceCreatedAt.put(instance.getId(), Objects.requireNonNullElse(r.createdAt(), Instant.now().toString()));
+            } catch (IOException | RuntimeException e) {
+                LOG.warnf("Could not restore DAIMon %s (%s): %s", r.name(), r.id(), e.getMessage());
+            }
+        }
+
+        for (ChannelDto c : repository.readJson("channels.json", ChannelDto[].class).orElse(new ChannelDto[0])) {
+            Set<String> team = Collections.synchronizedSet(new LinkedHashSet<>());
+            c.teamIds().stream().filter(instances::containsKey).forEach(team::add);
+            channels.put(c.name(), new Channel(c.name(), c.description(), team, Instant.parse(c.createdAt())));
+        }
+
+        LoadResult<InteractionDto> past = repository.readAllJson("interactions", InteractionDto.class);
+        past.problems().forEach(LOG::warn);
+        past.items().forEach(i -> archivedInteractions.put(i.id(), i));
+    }
+
+    private void persistInstance(DaimonInstance instance) {
+        try {
+            repository.saveInstance(new InstanceRecord(DaimonRepository.FORMAT_VERSION, instance.getId(),
+                    instance.getName(), instance.implementationType(), instance.getWorkspace().toString(),
+                    instanceBranches.get(instance.getId()),
+                    instance.getSerializationCommitCreatedFromSnapshotHash().orElse(null),
+                    instance.getSerializationCommitMostRecentSnapshotHash().orElse(null),
+                    instanceCreatedAt.computeIfAbsent(instance.getId(), id -> Instant.now().toString())));
+        } catch (IOException e) {
+            throw new UncheckedIOException("Failed to save DAIMon " + instance.getName(), e);
+        }
+    }
+
+    private void persistCommitAndRefs(SerializationCommit commit) {
+        try {
+            repository.saveCommit(commit);
+            repository.saveRefs(store.branches());
+        } catch (IOException e) {
+            throw new UncheckedIOException("Failed to save commit " + commit.shortHash(), e);
+        }
+    }
+
+    private void persistChannels() {
+        try {
+            repository.writeJson("channels.json", listChannels());
+        } catch (IOException e) {
+            throw new UncheckedIOException("Failed to save channels", e);
+        }
+    }
+
+    private void archiveInteraction(ChatRecord record) {
+        InteractionDto dto = toDto(record);
+        try {
+            repository.writeJson("interactions/" + DaimonRepository.requireSafeId(dto.id()) + ".json", dto);
+        } catch (IOException | RuntimeException e) {
+            LOG.warnf(e, "Could not save interaction %s", dto.id());
         }
     }
 
@@ -146,6 +252,7 @@ public class DaemonState {
     DaimonInstance register(DaimonInstance instance, String branch) {
         instances.put(instance.getId(), instance);
         instanceBranches.put(instance.getId(), branch);
+        persistInstance(instance);
         return instance;
     }
 
@@ -171,6 +278,8 @@ public class DaemonState {
         SerializationCommit commit = store.put(instance.serialize(
                 author == null || author.isBlank() ? "operator" : author, message, signer));
         store.updateBranch(instanceBranches.get(instanceId), commit.hash());
+        persistCommitAndRefs(commit);
+        persistInstance(instance);
         return toDto(commit);
     }
 
@@ -230,6 +339,7 @@ public class DaemonState {
         if (channels.putIfAbsent(normalized, channel) != null) {
             throw new IllegalStateException("Channel " + normalized + " already exists");
         }
+        persistChannels();
         return toDto(channel);
     }
 
@@ -244,6 +354,7 @@ public class DaemonState {
             channel.teamIds().clear();
             channel.teamIds().addAll(ids);
         }
+        persistChannels();
         return toDto(channel);
     }
 
@@ -273,9 +384,13 @@ public class DaemonState {
                         request.turnDelayMs() == null ? 1_200 : request.turnDelayMs()))))
                 .participants(participants)
                 .build();
-        interactions.put(chat.id(), new ChatRecord(chat, request.channel()));
-        chat.runAsync(interactionExecutor).whenComplete((status, error) -> rememberChat(chat, participants));
-        return toDto(interactions.get(chat.id()));
+        ChatRecord record = new ChatRecord(chat, request.channel());
+        interactions.put(chat.id(), record);
+        chat.runAsync(interactionExecutor).whenComplete((status, error) -> {
+            rememberChat(chat, participants);
+            archiveInteraction(record);
+        });
+        return toDto(record);
     }
 
     /** After a chat, each participant remembers it — leaving its workspace dirty until committed. */
@@ -295,16 +410,27 @@ public class DaemonState {
         }
     }
 
+    /** Live and archived interactions, newest first. */
     public List<InteractionDto> listInteractions() {
+        List<InteractionDto> result = new ArrayList<>();
         synchronized (interactions) {
-            List<InteractionDto> result = new ArrayList<>(interactions.values().stream().map(this::toDto).toList());
-            Collections.reverse(result);
-            return result;
+            interactions.values().forEach(r -> result.add(toDto(r)));
         }
+        archivedInteractions.values().stream().filter(a -> !interactions.containsKey(a.id())).forEach(result::add);
+        result.sort(Comparator.comparing(InteractionDto::createdAt).reversed());
+        return result;
     }
 
     public InteractionDto interaction(String id) {
-        return toDto(requireChat(id));
+        ChatRecord live = interactions.get(id);
+        if (live != null) {
+            return toDto(live);
+        }
+        InteractionDto archived = archivedInteractions.get(id);
+        if (archived == null) {
+            throw new NotFoundException("No interaction " + id);
+        }
+        return archived;
     }
 
     public InteractionDto submitHumanInput(String id, String author, String text) {
@@ -322,6 +448,9 @@ public class DaemonState {
     private ChatRecord requireChat(String id) {
         ChatRecord record = interactions.get(id);
         if (record == null) {
+            if (archivedInteractions.containsKey(id)) {
+                throw new IllegalStateException("Interaction " + id + " finished in a previous session");
+            }
             throw new NotFoundException("No interaction " + id);
         }
         return record;
@@ -393,6 +522,7 @@ public class DaemonState {
     SerializationCommit storeCommit(SerializationCommit commit, String branch) {
         SerializationCommit stored = store.put(signer.sign(commit));
         store.updateBranch(branch, stored.hash());
+        persistCommitAndRefs(stored);
         return stored;
     }
 }
